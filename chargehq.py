@@ -6,15 +6,22 @@ import configparser
 import jwt
 import time
 import os
-from socket import timeout
+import logging
+import socket
 from urllib.error import HTTPError, URLError
+
+workingDirectory = os.path.dirname(os.path.abspath(__file__))
+logfile = os.path.join(workingDirectory,'enphasetochargehq.log')
+
+logging.basicConfig(filename=logfile, format='%(asctime)s - %(levelname)s - %(message)s')
+logger=logging.getLogger()
+logger.setLevel(logging.INFO) 
 
 requests.packages.urllib3.disable_warnings()
 error = 'None'
 
 config = configparser.ConfigParser()
-config.read(os.path.join(os.path.dirname(__file__),'config.ini'))
-
+config.read(os.path.join(workingDirectory,'config.ini'))
 user = config['ENPHASE']['user']
 password = config['ENPHASE']['password']
 
@@ -31,23 +38,23 @@ if token_epoch:
 
 # Check for token and obtain if nessecary
 if token == "":
-   print('token missing')
+   logger.info('token missing')
    token_needed=True
-if token_epoch == "":
-   print('token epoch missing')
-   token_needed=True
-   token_epoch=1
-if token_epoch > 0:
-   time_diff = token_epoch - time.time()
-   if time_diff < 2592000:
-      print('token found but expires in less than 30 days')
-      token_needed=True 
-   else:
-      print('token found and does not need to be renewed')
-      token_needed=False
+else:   
+    if isinstance(token_epoch, int):
+        time_diff = token_epoch - time.time()
+        if time_diff < 2592000:
+            logger.info('token found but expires in less than 30 days')
+            token_needed=True 
+        else:
+            logger.info('token found and does not need to be renewed')
+            token_needed=False
+    else:
+        logger.info('token epoch is either missing or invalid')
+        token_needed=True 
 
 if token_needed:
-   print('obtaining token')
+   logger.debug('obtaining token')
    data = {'user[email]': user, 'user[password]': password}
    response = requests.post('https://enlighten.enphaseenergy.com/login/login.json', data=data)
    response_data = json.loads(response.text)
@@ -70,7 +77,7 @@ headers = {
    "Authorization": "Bearer " + token
 }
 
-response = requests.get(f'https://envoy.local/auth/check_jwt', headers=headers, verify=False)
+response = requests.get(f'https://192.168.86.28/auth/check_jwt', headers=headers, verify=False)
 
 if "Valid token." in response.text:
        sessionId = response.cookies['sessionId']
@@ -97,22 +104,17 @@ try:
 
 except (HTTPError, URLError):
     error = 'http_error'
-    print (error)
+    logger.error (error)
 except socket.timeout:
     error = 'Timeout'
-    print (error)
+    logger.error (error)
 else:
 
 # Massage Envoy json into ChargeHQ compatible json
 
+    production = round(data['production'][1]['wNow'] / 1000,2)
     consumption = round(data['consumption'][0]['wNow'] / 1000,2)
-    production = round(data['production'][0]['wNow'] / 1000,2)
-    grid = round(production - consumption,2)
-
-    if grid <0:
-        grid = abs(grid) # Invert grid value from Envoy value to keep ChargeHQ happy
-    else:
-        grid = -abs(grid) # Invert grid value from Envoy value to keep ChargeHQ happy
+    grid = round(data['consumption'][1]['wNow'] / 1000,2)
 
 # create new json
 
@@ -128,4 +130,4 @@ else:
 
     header = {'Content-type': 'application/json', 'Accept': 'text/plain'}
     r = requests.post(endPoint, data=json_dump, headers=header)
-    print(f"Status Code: {r.status_code}, Response: {r.json()}")
+    logger.debug(f"Status Code: {r.status_code}, Response: {r.json()}")
