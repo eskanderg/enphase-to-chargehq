@@ -77,7 +77,7 @@ headers = {
    "Authorization": "Bearer " + token
 }
 
-response = requests.get(f'https://192.168.86.28/auth/check_jwt', headers=headers, verify=False)
+response = requests.get(f'https://envoy.local/auth/check_jwt', headers=headers, verify=False)
 
 if "Valid token." in response.text:
        sessionId = response.cookies['sessionId']
